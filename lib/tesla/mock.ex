@@ -137,10 +137,11 @@ defmodule Tesla.Mock do
   """
   @spec mock((Tesla.Env.t() -> Tesla.Env.t() | {integer, map, any})) :: :ok
   def mock(fun) when is_function(fun) do
-    pdict_set(fun)
+    mock(self(), fun)
     :ok
   end
 
+  @spec mock(pid() | :global, (Tesla.Env.t() -> Tesla.Env.t() | {integer, map, any})) :: :ok
   def mock(pid, fun) do
     pagent_set(pid, fun)
     :ok
@@ -154,7 +155,7 @@ defmodule Tesla.Mock do
   """
   @spec mock_global((Tesla.Env.t() -> Tesla.Env.t() | {integer, map, any})) :: :ok
   def mock_global(fun) when is_function(fun) do
-    agent_set(fun)
+    mock(:global, fun)
     :ok
   end
 
@@ -206,7 +207,7 @@ defmodule Tesla.Mock do
   ## ADAPTER IMPLEMENTATION
 
   def call(env, _opts) do
-    case pdict_get() || pagent_get(self()) || agent_get() do
+    case pagent_get(self()) || pagent_get(:global) do
       nil ->
         raise Tesla.Mock.Error, env: env
 
@@ -230,41 +231,13 @@ defmodule Tesla.Mock do
     end
   end
 
-  defp pdict_set(fun), do: Process.put(__MODULE__, fun)
-  defp pdict_get, do: Process.get(__MODULE__)
-
-  defp agent_set(fun) do
+  defp pagent_set(pid, fun) do
     case Process.whereis(__MODULE__) do
       nil ->
         ExUnit.Callbacks.start_supervised!(
           %{
             id: __MODULE__,
-            start: {Agent, :start_link, [fn -> fun end, [{:name, __MODULE__}]]}
-          },
-          []
-        )
-
-      pid ->
-        Agent.update(pid, fn _ -> fun end)
-    end
-  end
-
-  defp agent_get do
-    case Process.whereis(__MODULE__) do
-      nil -> nil
-      pid -> Agent.get(pid, fn f -> f end)
-    end
-  end
-
-  defp pagent_set(pid, fun) do
-    pagent_name = __MODULE__.PAgent
-
-    case Process.whereis(pagent_name) do
-      nil ->
-        ExUnit.Callbacks.start_supervised!(
-          %{
-            id: __MODULE__.PAgent,
-            start: {Agent, :start_link, [fn -> %{pid => fun} end, [{:name, pagent_name}]]}
+            start: {Agent, :start_link, [fn -> %{pid => fun} end, [{:name, __MODULE__}]]}
           },
           []
         )
@@ -275,7 +248,7 @@ defmodule Tesla.Mock do
   end
 
   defp pagent_get(pid) do
-    case Process.whereis(__MODULE__.PAgent) do
+    case Process.whereis(__MODULE__) do
       nil -> nil
       pagent_pid -> Agent.get(pagent_pid, &Map.get(&1, pid))
     end
