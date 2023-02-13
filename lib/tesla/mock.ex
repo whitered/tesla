@@ -141,6 +141,11 @@ defmodule Tesla.Mock do
     :ok
   end
 
+  def mock(pid, fun) do
+    pagent_set(pid, fun)
+    :ok
+  end
+
   @doc """
   Setup global mocks.
 
@@ -201,7 +206,7 @@ defmodule Tesla.Mock do
   ## ADAPTER IMPLEMENTATION
 
   def call(env, _opts) do
-    case pdict_get() || agent_get() do
+    case pdict_get() || pagent_get(self()) || agent_get() do
       nil ->
         raise Tesla.Mock.Error, env: env
 
@@ -248,6 +253,31 @@ defmodule Tesla.Mock do
     case Process.whereis(__MODULE__) do
       nil -> nil
       pid -> Agent.get(pid, fn f -> f end)
+    end
+  end
+
+  defp pagent_set(pid, fun) do
+    pagent_name = __MODULE__.PAgent
+
+    case Process.whereis(pagent_name) do
+      nil ->
+        ExUnit.Callbacks.start_supervised!(
+          %{
+            id: __MODULE__.PAgent,
+            start: {Agent, :start_link, [fn -> %{pid => fun} end, [{:name, pagent_name}]]}
+          },
+          []
+        )
+
+      pagent_pid ->
+        Agent.update(pagent_pid, &Map.put(&1, pid, fun))
+    end
+  end
+
+  defp pagent_get(pid) do
+    case Process.whereis(__MODULE__.PAgent) do
+      nil -> nil
+      pagent_pid -> Agent.get(pagent_pid, &Map.get(&1, pid))
     end
   end
 
